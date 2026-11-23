@@ -40,10 +40,7 @@ class App:
 
         for point in self.map:
             x = (point.x - point.y) * math.cos(angle)
-            y = (
-                (point.x + point.y) * math.sin(angle)
-                - point.z
-            )
+            y = (point.x + point.y) * math.sin(angle) - point.z
             projected.append((point.x, point.y, x, y))
 
         min_x = min(item[2] for item in projected)
@@ -54,10 +51,7 @@ class App:
         map_width = max(max_x - min_x, 1.0)
         map_height = max(max_y - min_y, 1.0)
 
-        scale = min(
-            width / map_width,
-            height / map_height,
-        ) * 0.9
+        scale = min(width / map_width, height / map_height) * 0.9
 
         center_x = (min_x + max_x) / 2
         center_y = (min_y + max_y) / 2
@@ -65,12 +59,8 @@ class App:
         positions: dict[tuple[int, int], tuple[float, float]] = {}
 
         for x, y, projected_x, projected_y in projected:
-            screen_x = (
-                (projected_x - center_x) * scale + width / 2
-            )
-            screen_y = (
-                (projected_y - center_y) * scale + height / 2
-            )
+            screen_x = (projected_x - center_x) * scale + width / 2
+            screen_y = (projected_y - center_y) * scale + height / 2
             positions[(x, y)] = (screen_x, screen_y)
 
         for y in range(self.map.height):
@@ -93,8 +83,8 @@ class App:
                         width=2,
                     )
 
-    def _on_resize(self, event: tk.Event[tk.Misc]) -> None:
+    def _on_resize(self, event: tk.Event) -> None:
         self.root.after_idle(self._draw)
 
-    def _on_escape(self, event: tk.Event[tk.Misc]) -> None:
+    def _on_escape(self, event: tk.Event) -> None:
         self.root.destroy()

@@ -13,6 +13,7 @@ class MapFormatError(FdfError):
 
 
 def parse_map(file_path: str | Path) -> Map:
+    # Parse an FDF file and validate its map data.
     path = Path(file_path)
     content = path.read_text(encoding="utf-8")
     lines = content.splitlines()
@@ -62,7 +63,7 @@ def parse_map(file_path: str | Path) -> Map:
                 if not re.fullmatch(
                     r"0x[0-9a-f]{1,6}",
                     parts[1],
-                    re.IGNORECASE
+                    re.IGNORECASE,
                 ):
                     raise MapFormatError(
                         f"Row {y + 1}, column {x + 1}: invalid color"
@@ -70,14 +71,7 @@ def parse_map(file_path: str | Path) -> Map:
 
                 color = f"#{int(parts[1], 16):06X}"
 
-            row.append(
-                Point(
-                    x=x,
-                    y=y,
-                    z=z,
-                    color=color
-                )
-            )
+            row.append(Point(x=x, y=y, z=z, color=color))
 
         points.append(row)
 

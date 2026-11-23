@@ -7,6 +7,7 @@ from fdf.model import Map, Point
 class App:
     def __init__(self, map_data: Map) -> None:
         self.map = map_data
+        self.zoom = 1.0
 
         self.root = tk.Tk()
         self.root.title("FdF - Wireframe Viewer")
@@ -21,7 +22,12 @@ class App:
         self.canvas.pack(fill=tk.BOTH, expand=True)
 
         self.canvas.bind("<Configure>", self._on_resize)
+        self.canvas.bind("<MouseWheel>", self._on_mouse_wheel)
+
         self.root.bind("<Escape>", self._on_escape)
+        self.root.bind("+", self._zoom_in)
+        self.root.bind("-", self._zoom_out)
+        self.root.bind("=", self._zoom_in)
 
     def run(self) -> None:
         self.root.mainloop()
@@ -57,6 +63,7 @@ class App:
         map_height = max(max_y - min_y, 1.0)
 
         scale = min(width / map_width, height / map_height) * 0.9
+        scale *= self.zoom
 
         center_x = (min_x + max_x) / 2
         center_y = (min_y + max_y) / 2
@@ -89,6 +96,22 @@ class App:
                         fill=line_color,
                         width=2,
                     )
+
+    def _zoom_in(self, event: tk.Event) -> None:
+        self.zoom = min(self.zoom * 1.2, 10.0)
+        self._draw()
+
+    def _zoom_out(self, event: tk.Event) -> None:
+        self.zoom = max(self.zoom / 1.2, 0.1)
+        self._draw()
+
+    def _on_mouse_wheel(self, event: tk.Event) -> None:
+        if event.delta > 0:
+            self.zoom = min(self.zoom * 1.1, 10.0)
+        else:
+            self.zoom = max(self.zoom / 1.1, 0.1)
+
+        self._draw()
 
     def _on_resize(self, event: tk.Event) -> None:
         self.root.after_idle(self._draw)

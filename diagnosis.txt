@@ -1,0 +1,325 @@
+﻿================ main.py ================
+import sys
+
+from fdf.app import App
+from fdf.parser import FdfError, parse_map
+
+
+def main() -> int:
+    if len(sys.argv) != 2:
+        print(
+            "Usage: python main.py <file.fdf>",
+            file=sys.stderr,
+        )
+        return 2
+
+    file_path = sys.argv[1]
+
+    try:
+        map_data = parse_map(file_path)
+    except (FdfError, OSError) as error:
+        print(f"Error: {error}", file=sys.stderr)
+        return 1
+
+    app = App(map_data)
+    app.run()
+
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+================ fdf\model.py ================
+from dataclasses import dataclass
+from typing import Iterator
+
+
+@dataclass
+class Point:
+    x: int
+    y: int
+    z: int
+    color: str | None = None
+
+
+class Map:
+    def __init__(self, points: list[list[Point]]) -> None:
+        self.points = points
+        self.height = len(points)
+        self.width = len(points[0]) if points else 0
+
+    def __len__(self) -> int:
+        return self.width * self.height
+
+    def __iter__(self) -> Iterator[Point]:
+        for row in self.points:
+            yield from row
+
+    def neighbors(self, point: Point) -> list[Point]:
+        result: list[Point] = []
+        x, y = point.x, point.y
+
+        for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            nx, ny = x + dx, y + dy
+
+            if 0 <= ny < self.height and 0 <= nx < self.width:
+                result.append(self.points[ny][nx])
+
+        return result
+================ fdf\parser.py ================
+import re
+from pathlib import Path
+
+from fdf.model import Map, Point
+
+
+class FdfError(Exception):
+    pass
+
+
+class MapFormatError(FdfError):
+    pass
+
+
+def parse_map(file_path: str | Path) -> Map:
+    path = Path(file_path)
+    content = path.read_text(encoding="utf-8")
+    lines = content.splitlines()
+
+    while lines and not lines[-1].strip():
+        lines.pop()
+
+    if not lines:
+        raise MapFormatError("The file is empty")
+
+    points: list[list[Point]] = []
+    expected_width: int | None = None
+
+    for y, line in enumerate(lines):
+        values = line.split()
+
+        if not values:
+            raise MapFormatError(f"Row {y + 1}: empty row")
+
+        if expected_width is None:
+            expected_width = len(values)
+        elif len(values) != expected_width:
+            raise MapFormatError(
+                f"Row {y + 1}: inconsistent number of columns"
+            )
+
+        row: list[Point] = []
+
+        for x, value in enumerate(values):
+            parts = value.split(",")
+
+            if len(parts) > 2:
+                raise MapFormatError(
+                    f"Row {y + 1}, column {x + 1}: invalid format"
+                )
+
+            try:
+                z = int(parts[0])
+            except ValueError:
+                raise MapFormatError(
+                    f"Row {y + 1}, column {x + 1}: invalid height"
+                ) from None
+
+            color = None
+
+            if len(parts) == 2:
+                if not re.fullmatch(
+                    r"0x[0-9a-f]{1,6}",
+                    parts[1],
+                    re.IGNORECASE
+                ):
+                    raise MapFormatError(
+                        f"Row {y + 1}, column {x + 1}: invalid color"
+                    )
+
+                color = f"#{int(parts[1], 16):06X}"
+
+            row.append(
+                Point(
+                    x=x,
+                    y=y,
+                    z=z,
+                    color=color
+                )
+            )
+
+        points.append(row)
+
+    return Map(points)
+================ fdf\projection.py ================
+import math
+
+from fdf.model import Map, Point
+
+
+class Camera:
+    def __init__(
+        self,
+        scale: float = 1.0,
+        offset_x: float = 0.0,
+        offset_y: float = 0.0,
+        z_scale: float = 1.0,
+    ) -> None:
+        self.scale = scale
+        self.offset_x = offset_x
+        self.offset_y = offset_y
+        self.z_scale = z_scale
+
+    def project(self, point: Point) -> tuple[float, float]:
+        angle = math.radians(30)
+
+        projected_x = (point.x - point.y) * math.cos(angle)
+        projected_y = (
+            (point.x + point.y) * math.sin(angle)
+            - point.z * self.z_scale
+        )
+
+        screen_x = projected_x * self.scale + self.offset_x
+        screen_y = projected_y * self.scale + self.offset_y
+
+        return screen_x, screen_y
+
+    def fit(self, map_data: Map, width: int, height: int) -> None:
+        points = list(map_data)
+
+        if not points or width <= 0 or height <= 0:
+            return
+
+        angle = math.radians(30)
+
+        projected_points = []
+
+        for point in points:
+            x = (point.x - point.y) * math.cos(angle)
+            y = (
+                (point.x + point.y) * math.sin(angle)
+                - point.z * self.z_scale
+            )
+            projected_points.append((x, y))
+
+        min_x = min(point[0] for point in projected_points)
+        max_x = max(point[0] for point in projected_points)
+        min_y = min(point[1] for point in projected_points)
+        max_y = max(point[1] for point in projected_points)
+
+        map_width = max(max_x - min_x, 1.0)
+        map_height = max(max_y - min_y, 1.0)
+
+        self.scale = min(
+            width / map_width,
+            height / map_height,
+        ) * 0.9
+
+        self.offset_x = width / 2 - (
+            (min_x + max_x) / 2
+        ) * self.scale
+
+        self.offset_y = height / 2 - (
+            (min_y + max_y) / 2
+        ) * self.scale
+================ fdf\app.py ================
+import tkinter as tk
+import math
+
+from fdf.model import Map
+
+
+class App:
+    def __init__(self, map_data: Map) -> None:
+        self.map = map_data
+
+        self.root = tk.Tk()
+        self.root.title("FdF - Wireframe Viewer")
+        self.root.geometry("1000x700")
+        self.root.minsize(400, 300)
+
+        self.canvas = tk.Canvas(
+            self.root,
+            background="#202020",
+            highlightthickness=0,
+        )
+        self.canvas.pack(fill=tk.BOTH, expand=True)
+
+        self.canvas.bind("<Configure>", self._on_resize)
+        self.root.bind("<Escape>", self._on_escape)
+
+    def run(self) -> None:
+        self.root.mainloop()
+
+    def _draw(self) -> None:
+        self.canvas.delete("all")
+
+        width = self.canvas.winfo_width()
+        height = self.canvas.winfo_height()
+
+        if width <= 1 or height <= 1:
+            return
+
+        angle = math.radians(30)
+        projected = []
+
+        for point in self.map:
+            x = (point.x - point.y) * math.cos(angle)
+            y = (point.x + point.y) * math.sin(angle) - point.z
+            projected.append((point, x, y))
+
+        min_x = min(item[1] for item in projected)
+        max_x = max(item[1] for item in projected)
+        min_y = min(item[2] for item in projected)
+        max_y = max(item[2] for item in projected)
+
+        map_width = max(max_x - min_x, 1)
+        map_height = max(max_y - min_y, 1)
+
+        scale = min(
+            width / map_width,
+            height / map_height,
+        ) * 0.8
+
+        center_x = (min_x + max_x) / 2
+        center_y = (min_y + max_y) / 2
+
+        positions = {}
+
+        for point, x, y in projected:
+            screen_x = (x - center_x) * scale + width / 2
+            screen_y = (y - center_y) * scale + height / 2
+            positions[(point.x, point.y)] = (screen_x, screen_y)
+
+        for y in range(self.map.height):
+            for x in range(self.map.width):
+                point = self.map.points[y][x]
+                x1, y1 = positions[(x, y)]
+
+                if x + 1 < self.map.width:
+                    x2, y2 = positions[(x + 1, y)]
+                    self.canvas.create_line(
+                        x1, y1, x2, y2,
+                        fill="#FFFFFF",
+                        width=2,
+                    )
+
+                if y + 1 < self.map.height:
+                    x2, y2 = positions[(x, y + 1)]
+                    self.canvas.create_line(
+                        x1, y1, x2, y2,
+                        fill="#FFFFFF",
+                        width=2,
+                    )
+
+    def _on_resize(self, event: tk.Event) -> None:
+        self.root.after_idle(self._draw)
+
+    def _on_escape(self, event: tk.Event) -> None:
+        self.root.destroy()
+================ maps\elem.fdf ================
+00000
+02220
+02520
+02220
+00000
